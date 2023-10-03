@@ -4,7 +4,7 @@
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-2.0/
- * 
+ *
  * SPDX-License-Identifier: EPL-2.0
  *
  * Contributors:
@@ -15,10 +15,14 @@ package com.ibm.ws.security.openidconnect.client.jose4j.util;
 import java.security.AccessController;
 import java.security.Key;
 import java.security.PrivilegedAction;
+import java.util.Base64;
 import java.util.Date;
 import java.util.Hashtable;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
+import javax.net.ssl.SSLSocketFactory;
 import javax.security.auth.Subject;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletResponse;
@@ -52,6 +56,7 @@ import com.ibm.ws.security.openidconnect.clients.common.OidcSessionCache;
 import com.ibm.ws.security.openidconnect.clients.common.OidcSessionInfo;
 import com.ibm.ws.security.openidconnect.clients.common.OidcUtil;
 import com.ibm.ws.security.openidconnect.clients.common.TraceConstants;
+import com.ibm.ws.security.openidconnect.clients.common.UserInfoHelper;
 import com.ibm.ws.security.openidconnect.jose4j.Jose4jValidator;
 import com.ibm.ws.security.openidconnect.token.JWTTokenValidationFailedException;
 import com.ibm.ws.webcontainer.security.AuthResult;
@@ -92,38 +97,117 @@ public class Jose4jUtil {
         this.sslSupport = sslSupport;
     }
 
+    // ------------------------------------------------------
+    // TODO: START: ISSUE #25460
+    private JwtClaims getClaimsFromAccessToken(String accessTokenStr) throws Exception {
+        JwtClaims jwtClaims = null;
+        String[] parts = accessTokenStr.split(Pattern.quote(".")); // split out the "parts" (header, payload and signature)
+
+        if (parts.length > 1) {
+            String claimsAsJsonString = new String(Base64.getDecoder().decode(parts[1]), "UTF-8");
+            jwtClaims = JwtClaims.parse(claimsAsJsonString);
+        } else {
+            // do nothing
+        }
+        return jwtClaims;
+    }
+
+    private JwtClaims getClaimsFromIdToken(String tokenStr, ConvergedClientConfig clientConfig, OidcClientRequest oidcClientRequest) throws Exception {
+        String clientId = clientConfig.getClientId();
+        if (tokenStr == null || tokenStr.isEmpty()) {
+            // This is for ID Token only
+            Tr.error(tc, "OIDC_CLIENT_IDTOKEN_REQUEST_FAILURE", new Object[] { clientId, clientConfig.getTokenEndpointUrl() });
+            throw new Exception();
+        }
+
+        JwtContext jwtContext = validateJwtStructureAndGetContext(tokenStr, clientConfig);
+        JwtClaims jwtClaims = parseJwtWithValidation(clientConfig, jwtContext.getJwt(), jwtContext, oidcClientRequest);
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "post jwtClaims: " + jwtClaims + " firstPass jwtClaims=" + jwtContext.getJwtClaims());
+        }
+
+        return jwtClaims;
+    }
+
+    private JwtClaims getClaimsFromUserInfo(String userInfoStr) throws Exception {
+        return JwtClaims.parse(userInfoStr);
+    }
+
+    private OidcTokenImplBase getOidcToken(JwtClaims jwtClaims, String accessToken, String refreshToken, String clientId,
+            String tokenTypeNoSpace) {
+        return new OidcTokenImplBase(jwtClaims, accessToken, refreshToken, clientId, tokenTypeNoSpace);
+    }
+
+    // TODO: END: ISSUE #25460
+    // ------------------------------------------------------
+
     // eliminate the FFDC since we will have the Tr.error and most of the Exception already handled by FFDC
     @FFDCIgnore({ Exception.class })
     public ProviderAuthenticationResult createResultWithJose4J(String responseState,
             Map<String, String> tokens,
             ConvergedClientConfig clientConfig,
-            OidcClientRequest oidcClientRequest) {
+            OidcClientRequest oidcClientRequest,
+            SSLSocketFactory sslSocketFactory) {
         //oidcClientRequest.setTokenType(OidcClientRequest.TYPE_); // decided by the caller
         // This is for ID Token only at the writing time
         ProviderAuthenticationResult oidcResult = null;
-        String tokenStr = getIdToken(tokens, clientConfig);
-        String originalIdTokenString = tokenStr;
-        String accessToken = tokens.get(Constants.ACCESS_TOKEN);
-        String refreshToken = tokens.get(Constants.REFRESH_TOKEN);
+        String idTokenStr = getIdToken(tokens, clientConfig);
+        String originalIdTokenString = idTokenStr;
+        String accessTokenStr = tokens.get(Constants.ACCESS_TOKEN);
+        String refreshTokenStr = tokens.get(Constants.REFRESH_TOKEN);
         String clientId = clientConfig.getClientId();
-        try {
-            if (tokenStr == null || tokenStr.isEmpty()) {
-                // This is for ID Token only
-                Tr.error(tc, "OIDC_CLIENT_IDTOKEN_REQUEST_FAILURE", new Object[] { clientId, clientConfig.getTokenEndpointUrl() });
-                return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
-            }
-            JwtContext jwtContext = validateJwtStructureAndGetContext(tokenStr, clientConfig);
-            JwtClaims jwtClaims = parseJwtWithValidation(clientConfig, jwtContext.getJwt(), jwtContext, oidcClientRequest);
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                Tr.debug(tc, "post jwtClaims: " + jwtClaims + " firstPass jwtClaims=" + jwtContext.getJwtClaims());
-            }
-            OidcTokenImplBase idToken = new OidcTokenImplBase(jwtClaims, accessToken, refreshToken, clientId, oidcClientRequest.getTokenTypeNoSpace());
 
-            if (idToken.getSubject() == null) {
+        try {
+            JwtClaims idTokenClaims = getClaimsFromIdToken(idTokenStr, clientConfig, oidcClientRequest);
+            OidcTokenImplBase idToken = getOidcToken(idTokenClaims, accessTokenStr, refreshTokenStr, clientId, Constants.TOKEN_TYPE_ID_TOKEN);
+            String sub = idToken.getSubject();
+            if (sub == null) {
                 return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
             }
-            AttributeToSubject attributeToSubject = new AttributeToSubject(clientConfig, idToken);
-            if (attributeToSubject.checkUserNameForNull()) {
+
+            UserInfoHelper userInfoHelper = new UserInfoHelper(clientConfig, sslSupport);
+            String userInfoStr = userInfoHelper.getUserInfoIfPossible(sub, accessTokenStr, sslSocketFactory, oidcClientRequest);
+
+            List<String> tokesInOrder = clientConfig.getTokenOrderToFetchCallerClaims();
+            OidcTokenImplBase oidcToken = null;
+            AttributeToSubject attributeToSubject = null;
+            boolean validated = false;
+
+            for (String token : tokesInOrder) {
+                switch (token) {
+                case Constants.TOKEN_TYPE_ACCESS_TOKEN:
+                    JwtClaims accessTokenClaims = getClaimsFromAccessToken(accessTokenStr);
+                    OidcTokenImplBase accessToken = getOidcToken(accessTokenClaims, accessTokenStr, refreshTokenStr, clientId, Constants.TOKEN_TYPE_ACCESS_TOKEN);
+                    AttributeToSubject attributeToSubject1 = new AttributeToSubject(clientConfig, accessToken);
+                    if (!attributeToSubject1.checkUserNameForNull() && !attributeToSubject1.checkGroupIdsForNull()) {
+                        attributeToSubject = attributeToSubject1;
+                        oidcToken = accessToken;
+                        validated = true;
+                    }
+                    break;
+                case Constants.TOKEN_TYPE_ID_TOKEN:
+                    AttributeToSubject attributeToSubject2 = new AttributeToSubject(clientConfig, idToken);
+                    if (!attributeToSubject2.checkUserNameForNull() && !attributeToSubject2.checkGroupIdsForNull()) {
+                        attributeToSubject = attributeToSubject2;
+                        oidcToken = idToken;
+                        validated = true;
+                    }
+                    break;
+                case Constants.TOKEN_TYPE_USER_INFO:
+                    JwtClaims userInfoClaims = getClaimsFromUserInfo(userInfoStr);
+                    OidcTokenImplBase userInfoToken = getOidcToken(userInfoClaims, accessTokenStr, refreshTokenStr, clientId, Constants.TOKEN_TYPE_USER_INFO);
+                    AttributeToSubject attributeToSubject3 = new AttributeToSubject(clientConfig, userInfoToken);
+                    if (!attributeToSubject3.checkUserNameForNull() && !attributeToSubject3.checkGroupIdsForNull()) {
+                        attributeToSubject = attributeToSubject3;
+                        oidcToken = userInfoToken;
+                        validated = true;
+                    }
+                    break;
+                }
+                if (validated)
+                    break;
+            }
+            if (!validated) {
                 return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
             }
 
@@ -131,7 +215,7 @@ public class Jose4jUtil {
             // verify nonce when nonce is enabled
             // this id for ID Token only
             if (clientConfig.isNonceEnabled() || isImplicit) {
-                String nonceInIDToken = idToken.getNonce();
+                String nonceInIDToken = oidcToken.getNonce();
                 boolean bNonceVerified = OidcUtil.verifyNonce(oidcClientRequest, nonceInIDToken, clientConfig, responseState);
                 if (!bNonceVerified) {
                     // Error handling
@@ -148,16 +232,17 @@ public class Jose4jUtil {
                 }
                 Hashtable<String, Object> props = new Hashtable<String, Object>();
                 props.put(Constants.ID_TOKEN, originalIdTokenString);
-                props.put(Constants.ACCESS_TOKEN, accessToken);
-                if (refreshToken != null) {
-                    props.put(Constants.REFRESH_TOKEN, refreshToken);
+                props.put(Constants.ACCESS_TOKEN, accessTokenStr);
+                if (refreshTokenStr != null) {
+                    props.put(Constants.REFRESH_TOKEN, refreshTokenStr);
                 }
-                if (idToken != null) {
-                    props.put(Constants.ID_TOKEN_OBJECT, idToken);
+                if (oidcToken != null) {
+                    props.put(Constants.ID_TOKEN_OBJECT, oidcToken);
                 }
                 oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, null, null, props, null);
                 if (isRunningBetaMode()) {
-                    createWASOidcSession(oidcClientRequest, jwtClaims, clientConfig);
+                    //createWASOidcSession(oidcClientRequest, jwtClaims, clientConfig);
+                    createWASOidcSession(oidcClientRequest, oidcToken.getJwtClaims(), clientConfig);
                 }
                 return oidcResult;
             }
@@ -175,27 +260,35 @@ public class Jose4jUtil {
             Subject subject = null;
             if (clientConfig.isIncludeIdTokenInSubject()) {
                 subject = new Subject();
-                subject.getPrivateCredentials().add(idToken); // add the external IDToken
+                subject.getPrivateCredentials().add(oidcToken); // add the external IDToken
                 customProperties.putAll(tokens); // add ALL tokens to props.
             } else {
-                if (refreshToken != null) {
-                    customProperties.put(Constants.REFRESH_TOKEN, refreshToken);
+                if (refreshTokenStr != null) {
+                    customProperties.put(Constants.REFRESH_TOKEN, refreshTokenStr);
                 }
-                if (accessToken != null) {
-                    customProperties.put(Constants.ACCESS_TOKEN, accessToken);
+                if (accessTokenStr != null) {
+                    customProperties.put(Constants.ACCESS_TOKEN, accessTokenStr);
                 }
             }
-            if (idToken != null) {
-                customProperties.put(Constants.ID_TOKEN_OBJECT, idToken); // pass back to authenticator
+            if (oidcToken != null) {
+                customProperties.put(Constants.ID_TOKEN_OBJECT, oidcToken); // pass back to authenticator
             }
 
             //addJWTTokenToSubject(customProperties, idToken, clientConfig);
+
+            // ------------------------------------------------------
+            // TODO: START: ISSUE #25460
+            if (userInfoStr != null) {
+                customProperties.put(Constants.USERINFO_STR, userInfoStr);
+            }
+            // TODO: END: ISSUE #25460
+            // ------------------------------------------------------
 
             //doIdAssertion(customProperties, payload, clientConfig);
             oidcResult = attributeToSubject.doMapping(customProperties, subject);
             //oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, username, subject, customProperties, null);
             if (oidcResult.getStatus() == AuthResult.SUCCESS && isRunningBetaMode()) {
-                createWASOidcSession(oidcClientRequest, jwtClaims, clientConfig);
+                createWASOidcSession(oidcClientRequest, oidcToken.getJwtClaims(), clientConfig);
             }
         } catch (Exception e) {
             Tr.error(tc, "OIDC_CLIENT_IDTOKEN_VERIFY_ERR", new Object[] { e.getLocalizedMessage(), clientId });

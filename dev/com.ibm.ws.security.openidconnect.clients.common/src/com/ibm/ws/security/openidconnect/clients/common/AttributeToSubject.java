@@ -359,4 +359,22 @@ public class AttributeToSubject {
         }
     }
 
+    /**
+     * @return the groupIds
+     */
+    public ArrayList<String> getGroupIds() {
+        return groupIds;
+    }
+
+    public boolean checkGroupIdsForNull() {
+        if (groupIds == null || groupIds.isEmpty()) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(tc, "There is no group IDs found!");
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
 }

@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.StringTokenizer;
 
 import javax.net.ssl.SSLSocketFactory;
 
@@ -176,6 +177,7 @@ public class OidcClientConfigImpl implements OidcClientConfig {
     public static final String CFG_KEY_ACCESS_TOKEN_CACHE_TIMEOUT = "accessTokenCacheTimeout";
     public static final String CFG_KEY_PKCE_CODE_CHALLENGE_METHOD = "pkceCodeChallengeMethod";
     public static final String CFG_KEY_TOKEN_REQUEST_ORIGIN_HEADER = "tokenRequestOriginHeader";
+    public static final String CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS = "tokenOrderToFetchCallerClaims";
 
     public static final String OPDISCOVERY_AUTHZ_EP_URL = "authorization_endpoint";
     public static final String OPDISCOVERY_TOKEN_EP_URL = "token_endpoint";
@@ -307,6 +309,8 @@ public class OidcClientConfigImpl implements OidcClientConfig {
 
     private boolean useSystemPropertiesForHttpClientConnections = false;
     private boolean tokenReuse = false;
+
+    private List<String> tokenOrderToFetchCallerClaims;
 
     private final OidcSessionCache oidcSessionCache = new InMemoryOidcSessionCache();
 
@@ -562,6 +566,14 @@ public class OidcClientConfigImpl implements OidcClientConfig {
         // checkValidationEndpointUrl();
 
         // validateAuthzTokenEndpoints(); //TODO: update tests to expect the error if the validation here fails
+
+        tokenOrderToFetchCallerClaims = new ArrayList<String>();
+        String tokenOrderStr = trimIt((String) props.get(CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS));
+        StringTokenizer st = new StringTokenizer(tokenOrderStr, ",");
+        while (st.hasMoreElements()) {
+            tokenOrderToFetchCallerClaims.add(st.nextToken());
+        }
+        // if
 
         if (discovery) {
             logDiscoveryMessage("OIDC_CLIENT_DISCOVERY_COMPLETE");
@@ -1940,6 +1952,11 @@ public class OidcClientConfigImpl implements OidcClientConfig {
     @Override
     public String getTokenRequestOriginHeader() {
         return tokenRequestOriginHeader;
+    }
+
+    @Override
+    public List<String> getTokenOrderToFetchCallerClaims() {
+        return tokenOrderToFetchCallerClaims;
     }
 
 }
