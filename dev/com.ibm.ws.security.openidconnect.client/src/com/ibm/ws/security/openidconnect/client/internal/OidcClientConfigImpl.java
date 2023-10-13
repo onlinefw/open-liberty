@@ -1953,7 +1953,7 @@ public class OidcClientConfigImpl implements OidcClientConfig {
     }
 
     @Override
-    public List<String> getTokenOrderToFetchCallerClaims() {
+    public String[] getTokenOrderToFetchCallerClaims() {
         return tokenOrderToFetchCallerClaims;
     }
 
