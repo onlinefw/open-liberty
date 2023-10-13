@@ -15,11 +15,14 @@ package com.ibm.ws.security.openidconnect.client.jose4j.util;
 import java.security.AccessController;
 import java.security.Key;
 import java.security.PrivilegedAction;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import javax.net.ssl.SSLSocketFactory;
@@ -97,8 +100,6 @@ public class Jose4jUtil {
         this.sslSupport = sslSupport;
     }
 
-    // ------------------------------------------------------
-    // TODO: START: ISSUE #25460
     private JwtClaims getClaimsFromAccessToken(String accessTokenStr) throws Exception {
         JwtClaims jwtClaims = null;
         String[] parts = accessTokenStr.split(Pattern.quote(".")); // split out the "parts" (header, payload and signature)
@@ -138,9 +139,6 @@ public class Jose4jUtil {
         return new OidcTokenImplBase(jwtClaims, accessToken, refreshToken, clientId, tokenTypeNoSpace);
     }
 
-    // TODO: END: ISSUE #25460
-    // ------------------------------------------------------
-
     // eliminate the FFDC since we will have the Tr.error and most of the Exception already handled by FFDC
     @FFDCIgnore({ Exception.class })
     public ProviderAuthenticationResult createResultWithJose4J(String responseState,
@@ -156,6 +154,7 @@ public class Jose4jUtil {
         String accessTokenStr = tokens.get(Constants.ACCESS_TOKEN);
         String refreshTokenStr = tokens.get(Constants.REFRESH_TOKEN);
         String clientId = clientConfig.getClientId();
+        Hashtable<String, Object> customProperties = new Hashtable<String, Object>();
 
         try {
             JwtClaims idTokenClaims = getClaimsFromIdToken(idTokenStr, clientConfig, oidcClientRequest);
@@ -168,54 +167,42 @@ public class Jose4jUtil {
             UserInfoHelper userInfoHelper = new UserInfoHelper(clientConfig, sslSupport);
             String userInfoStr = userInfoHelper.getUserInfoIfPossible(sub, accessTokenStr, sslSocketFactory, oidcClientRequest);
 
-            List<String> tokesInOrder = clientConfig.getTokenOrderToFetchCallerClaims();
-            OidcTokenImplBase oidcToken = null;
-            AttributeToSubject attributeToSubject = null;
-            boolean validated = false;
+            JwtClaims accessTokenClaims = getClaimsFromAccessToken(accessTokenStr);
+            JwtClaims userInfoClaims = getClaimsFromUserInfo(userInfoStr);
+            Map<String, JwtClaims> tokenClaimsMap = new HashMap<String, JwtClaims>();
+            tokenClaimsMap.put(Constants.TOKEN_TYPE_ACCESS_TOKEN, accessTokenClaims);
+            tokenClaimsMap.put(Constants.TOKEN_TYPE_ID_TOKEN, idTokenClaims);
+            tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
+            String[] tokesInOrder = clientConfig.getTokenOrderToFetchCallerClaims();
 
-            for (String token : tokesInOrder) {
-                switch (token) {
-                case Constants.TOKEN_TYPE_ACCESS_TOKEN:
-                    JwtClaims accessTokenClaims = getClaimsFromAccessToken(accessTokenStr);
-                    OidcTokenImplBase accessToken = getOidcToken(accessTokenClaims, accessTokenStr, refreshTokenStr, clientId, Constants.TOKEN_TYPE_ACCESS_TOKEN);
-                    AttributeToSubject attributeToSubject1 = new AttributeToSubject(clientConfig, accessToken);
-                    if (!attributeToSubject1.checkUserNameForNull() && !attributeToSubject1.checkGroupIdsForNull()) {
-                        attributeToSubject = attributeToSubject1;
-                        oidcToken = accessToken;
-                        validated = true;
-                    }
-                    break;
-                case Constants.TOKEN_TYPE_ID_TOKEN:
-                    AttributeToSubject attributeToSubject2 = new AttributeToSubject(clientConfig, idToken);
-                    if (!attributeToSubject2.checkUserNameForNull() && !attributeToSubject2.checkGroupIdsForNull()) {
-                        attributeToSubject = attributeToSubject2;
-                        oidcToken = idToken;
-                        validated = true;
-                    }
-                    break;
-                case Constants.TOKEN_TYPE_USER_INFO:
-                    JwtClaims userInfoClaims = getClaimsFromUserInfo(userInfoStr);
-                    OidcTokenImplBase userInfoToken = getOidcToken(userInfoClaims, accessTokenStr, refreshTokenStr, clientId, Constants.TOKEN_TYPE_USER_INFO);
-                    AttributeToSubject attributeToSubject3 = new AttributeToSubject(clientConfig, userInfoToken);
-                    if (!attributeToSubject3.checkUserNameForNull() && !attributeToSubject3.checkGroupIdsForNull()) {
-                        attributeToSubject = attributeToSubject3;
-                        oidcToken = userInfoToken;
-                        validated = true;
-                    }
-                    break;
-                }
-                if (validated)
-                    break;
-            }
-            if (!validated) {
+            String userName = this.getUserName(clientConfig, tokesInOrder, tokenClaimsMap);
+            if (userName == null || userName.isEmpty()) {
                 return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
+            }
+
+            if (!clientConfig.isMapIdentityToRegistryUser()) {
+                String realm = this.getRealmName(clientConfig, tokesInOrder, tokenClaimsMap);
+                if (realm != null && !realm.isEmpty()) {
+                    customProperties.put(AttributeNameConstants.WSCREDENTIAL_REALM, realm);
+                }
+                String uniqueSecurityName = this.getUniqueSecurityName(clientConfig, tokesInOrder, tokenClaimsMap, userName);
+                if (uniqueSecurityName != null && !uniqueSecurityName.isEmpty()) {
+                    customProperties.put(AttributeNameConstants.WSCREDENTIAL_REALM, realm);
+                }
+                List<String> groups = getGroups(clientConfig, tokesInOrder, tokenClaimsMap, realm);
+                if (groups != null && !groups.isEmpty()) {
+                    customProperties.put(AttributeNameConstants.WSCREDENTIAL_GROUPS, groups);
+                }
+
+                String uniqueID = new StringBuffer("user:").append(realm).append("/").append(uniqueSecurityName).toString();
+                customProperties.put(AttributeNameConstants.WSCREDENTIAL_UNIQUEID, uniqueID);
             }
 
             boolean isImplicit = Constants.IMPLICIT.equals(clientConfig.getGrantType());
             // verify nonce when nonce is enabled
             // this id for ID Token only
             if (clientConfig.isNonceEnabled() || isImplicit) {
-                String nonceInIDToken = oidcToken.getNonce();
+                String nonceInIDToken = idToken.getNonce();
                 boolean bNonceVerified = OidcUtil.verifyNonce(oidcClientRequest, nonceInIDToken, clientConfig, responseState);
                 if (!bNonceVerified) {
                     // Error handling
@@ -236,22 +223,24 @@ public class Jose4jUtil {
                 if (refreshTokenStr != null) {
                     props.put(Constants.REFRESH_TOKEN, refreshTokenStr);
                 }
-                if (oidcToken != null) {
-                    props.put(Constants.ID_TOKEN_OBJECT, oidcToken);
+                if (idToken != null) {
+                    props.put(Constants.ID_TOKEN_OBJECT, idToken);
+                }
+                if (userInfoStr != null) {
+                    customProperties.put(Constants.USERINFO_STR, userInfoStr);
                 }
                 oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, null, null, props, null);
                 if (isRunningBetaMode()) {
                     //createWASOidcSession(oidcClientRequest, jwtClaims, clientConfig);
-                    createWASOidcSession(oidcClientRequest, oidcToken.getJwtClaims(), clientConfig);
+                    createWASOidcSession(oidcClientRequest, idToken.getJwtClaims(), clientConfig);
                 }
                 return oidcResult;
             }
 
-            Hashtable<String, Object> customProperties = new Hashtable<String, Object>();
             if (clientConfig.isIncludeCustomCacheKeyInSubject() || clientConfig.isDisableLtpaCookie()) {
-                long storingTime = new Date().getTime();
+                //long storingTime = new Date().getTime();
                 String customCacheKey = oidcClientRequest.getAndSetCustomCacheKeyValue(); //username + tokenStr.toString().hashCode();
-                customProperties.put(ClientConstants.CREDENTIAL_STORING_TIME_MILLISECONDS, Long.valueOf(storingTime));
+                //customProperties.put(ClientConstants.CREDENTIAL_STORING_TIME_MILLISECONDS, Long.valueOf(storingTime));
                 if (clientConfig.isIncludeCustomCacheKeyInSubject()) {
                     customProperties.put(AttributeNameConstants.WSCREDENTIAL_CACHE_KEY, customCacheKey);
                 }
@@ -260,7 +249,7 @@ public class Jose4jUtil {
             Subject subject = null;
             if (clientConfig.isIncludeIdTokenInSubject()) {
                 subject = new Subject();
-                subject.getPrivateCredentials().add(oidcToken); // add the external IDToken
+                subject.getPrivateCredentials().add(idToken); // add the external IDToken
                 customProperties.putAll(tokens); // add ALL tokens to props.
             } else {
                 if (refreshTokenStr != null) {
@@ -270,25 +259,22 @@ public class Jose4jUtil {
                     customProperties.put(Constants.ACCESS_TOKEN, accessTokenStr);
                 }
             }
-            if (oidcToken != null) {
-                customProperties.put(Constants.ID_TOKEN_OBJECT, oidcToken); // pass back to authenticator
+            if (idToken != null) {
+                customProperties.put(Constants.ID_TOKEN_OBJECT, idToken); // pass back to authenticator
             }
 
             //addJWTTokenToSubject(customProperties, idToken, clientConfig);
 
-            // ------------------------------------------------------
-            // TODO: START: ISSUE #25460
             if (userInfoStr != null) {
                 customProperties.put(Constants.USERINFO_STR, userInfoStr);
             }
-            // TODO: END: ISSUE #25460
-            // ------------------------------------------------------
+
+            customProperties.put(ClientConstants.CREDENTIAL_STORING_TIME_MILLISECONDS, Long.valueOf(new Date().getTime())); // this is GMT/UTC time already
 
             //doIdAssertion(customProperties, payload, clientConfig);
-            oidcResult = attributeToSubject.doMapping(customProperties, subject);
-            //oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, username, subject, customProperties, null);
+            oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, userName, subject, customProperties, null);
             if (oidcResult.getStatus() == AuthResult.SUCCESS && isRunningBetaMode()) {
-                createWASOidcSession(oidcClientRequest, oidcToken.getJwtClaims(), clientConfig);
+                createWASOidcSession(oidcClientRequest, idToken.getJwtClaims(), clientConfig);
             }
         } catch (Exception e) {
             Tr.error(tc, "OIDC_CLIENT_IDTOKEN_VERIFY_ERR", new Object[] { e.getLocalizedMessage(), clientId });
@@ -576,4 +562,138 @@ public class Jose4jUtil {
         return validator.validateJwsSignature((JsonWebSignature) jwStructure, jwtContext.getJwt());
     }
 
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    String getUserName(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+        String userNameClaim = getUserNameClaim(clientConfig);
+        String userName = getClaimValueFromTokens(userNameClaim, String.class, tokesInOrder, tokenClaimsMap);
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "user name = '" + userName + "' and the user identifier = " + userNameClaim);
+        }
+
+        if (userName == null) {
+            Tr.error(tc, "OIDC_CLIENT_JWT_MISSING_CLAIM", new Object[] { clientConfig.getClientId(), userNameClaim });
+            Tr.debug(tc, "There is no principal");
+        }
+        return userName;
+    }
+
+    String getUserNameClaim(ConvergedClientConfig clientConfig) {
+        String attrUsedToCreateSubject = clientConfig.isSocial() ? "userNameAttribute" : "userIdentifier";
+        String uid = clientConfig.getUserIdentifier();
+        if (uid == null || uid.isEmpty()) {
+            attrUsedToCreateSubject = clientConfig.isSocial() ? "userNameAttribute" : "userIdentityToCreateSubject";
+            uid = clientConfig.getUserIdentityToCreateSubject();
+        }
+
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "The " + attrUsedToCreateSubject + " config attribute is used");
+            Tr.debug(tc, "the user identifier = " + uid);
+        }
+        return uid;
+    }
+
+    String getRealmName(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+        String realm = clientConfig.getRealmName();
+        if (realm == null) {
+            for (String claim : getRealmNameClaim(clientConfig)) {
+                realm = getClaimValueFromTokens(claim, String.class, tokesInOrder, tokenClaimsMap);
+                if (realm != null && !realm.isEmpty()) {
+                    break;
+                }
+            }
+        }
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "realm name = ", realm);
+        }
+        return realm;
+    }
+
+    List<String> getRealmNameClaim(ConvergedClientConfig clientConfig) {
+        List<String> claims = new ArrayList<String>();
+        String claim = clientConfig.getRealmIdentifier();
+        if (claim != null && !claim.isEmpty()) {
+            claims.add(claim);
+        }
+        claims.add(ClientConstants.ISS);
+        return claims;
+    }
+
+    String getUniqueSecurityName(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String userName) throws MalformedClaimException {
+        String uniqueSecurityNameClaim = getUserNameClaim(clientConfig);
+        String uniqueSecurityName = getClaimValueFromTokens(uniqueSecurityNameClaim, String.class, tokesInOrder, tokenClaimsMap);
+
+        if (uniqueSecurityName == null || uniqueSecurityName.isEmpty()) {
+            uniqueSecurityName = userName;
+        }
+        return uniqueSecurityName;
+    }
+
+    String getUniqueSecurityNameClaim(ConvergedClientConfig clientConfig) {
+        return clientConfig.getUniqueUserIdentifier();
+    }
+
+    List<String> getGroups(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String realm) throws MalformedClaimException {
+        List<String> groups = new ArrayList<String>();
+        List<String> groupIds = getGroupIds(clientConfig, tokesInOrder, tokenClaimsMap);
+        for (String gid : groupIds) {
+            String group = new StringBuffer("group:").append(realm).append("/").append(gid).toString();
+            groups.add(group);
+        }
+        return groups;
+    }
+
+    @SuppressWarnings("unchecked")
+    List<String> getGroupIds(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+        String groupIdsClaim = getGroupIdsClaim(clientConfig);
+        List<String> groupIds = getClaimValueFromTokens(groupIdsClaim, List.class, tokesInOrder, tokenClaimsMap);
+        if (groupIds == null) {
+            groupIds = new ArrayList<String>();
+            String groupIdsStr = getClaimValueFromTokens(groupIdsClaim, String.class, tokesInOrder, tokenClaimsMap);
+            if (groupIdsStr != null) {
+                groupIds.add(groupIdsStr);
+            }
+        }
+        if (groupIds.size() > 0 && TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "groupIds=" + groupIds.toString() + " groups size = ", groupIds.size());
+        }
+        return groupIds;
+    }
+
+    String getGroupIdsClaim(ConvergedClientConfig clientConfig) {
+        return clientConfig.getGroupIdentifier();
+    }
+
+    <T> T getClaimValueFromTokens(String claim, Class<T> claimType, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+        if (claim == null || claim.isEmpty()) {
+            return null;
+        }
+        T claimValue = null;
+        for (String token : tokesInOrder) {
+            JwtClaims tokenClaims = tokenClaimsMap.get(token);
+            if (tokenClaims != null) {
+                claimValue = tokenClaims.getClaimValue(claim, claimType);
+                if (valueExistsAndIsNotEmpty(claimValue, claimType))
+                    break;
+            }
+        }
+        return claimValue;
+    }
+
+    @SuppressWarnings("rawtypes")
+    <T> boolean valueExistsAndIsNotEmpty(T claimValue, Class<T> claimType) {
+        if (claimValue == null) {
+            return false;
+        }
+        if (claimType.equals(String.class) && ((String) claimValue).isEmpty()) {
+            return false;
+        }
+        if (claimType.equals(Set.class) && ((Set) claimValue).isEmpty()) {
+            return false;
+        }
+        if (claimType.equals(List.class) && ((List) claimValue).isEmpty()) {
+            return false;
+        }
+        return true;
+    }
 }

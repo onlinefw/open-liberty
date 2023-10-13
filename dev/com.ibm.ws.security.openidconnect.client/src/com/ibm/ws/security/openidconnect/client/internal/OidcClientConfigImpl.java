@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.StringTokenizer;
 
 import javax.net.ssl.SSLSocketFactory;
 
@@ -310,7 +309,7 @@ public class OidcClientConfigImpl implements OidcClientConfig {
     private boolean useSystemPropertiesForHttpClientConnections = false;
     private boolean tokenReuse = false;
 
-    private List<String> tokenOrderToFetchCallerClaims;
+    private String[] tokenOrderToFetchCallerClaims;
 
     private final OidcSessionCache oidcSessionCache = new InMemoryOidcSessionCache();
 
@@ -567,13 +566,10 @@ public class OidcClientConfigImpl implements OidcClientConfig {
 
         // validateAuthzTokenEndpoints(); //TODO: update tests to expect the error if the validation here fails
 
-        tokenOrderToFetchCallerClaims = new ArrayList<String>();
-        String tokenOrderStr = trimIt((String) props.get(CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS));
-        StringTokenizer st = new StringTokenizer(tokenOrderStr, ",");
-        while (st.hasMoreElements()) {
-            tokenOrderToFetchCallerClaims.add(st.nextToken());
+        tokenOrderToFetchCallerClaims = trimIt((String[]) props.get(CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS));
+        if (tokenOrderToFetchCallerClaims == null || tokenOrderToFetchCallerClaims.length == 0) {
+            tokenOrderToFetchCallerClaims = new String[] { com.ibm.ws.security.openidconnect.clients.common.Constants.TOKEN_TYPE_ID_TOKEN };
         }
-        // if
 
         if (discovery) {
             logDiscoveryMessage("OIDC_CLIENT_DISCOVERY_COMPLETE");
@@ -649,7 +645,9 @@ public class OidcClientConfigImpl implements OidcClientConfig {
             Tr.debug(tc, "accessTokenCacheTimeout:" + accessTokenCacheTimeout);
             Tr.debug(tc, "pkceCodeChallengeMethod:" + pkceCodeChallengeMethod);
             Tr.debug(tc, "tokenRequestOriginHeader:" + tokenRequestOriginHeader);
+            Tr.debug(tc, "tokenOrderToFetchCallerClaims:" + tokenOrderToFetchCallerClaims);
         }
+
     }
 
     private void initializeAccessTokenCache() {
