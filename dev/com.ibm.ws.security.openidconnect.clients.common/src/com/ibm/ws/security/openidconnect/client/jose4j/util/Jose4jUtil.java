@@ -646,12 +646,17 @@ public class Jose4jUtil {
     @SuppressWarnings("unchecked")
     List<String> getGroupIds(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String groupIdsClaim = getGroupIdsClaim(clientConfig);
-        List<String> groupIds = getClaimValueFromTokens(groupIdsClaim, List.class, tokesInOrder, tokenClaimsMap);
-        if (groupIds == null) {
-            groupIds = new ArrayList<String>();
-            String groupIdsStr = getClaimValueFromTokens(groupIdsClaim, String.class, tokesInOrder, tokenClaimsMap);
-            if (groupIdsStr != null) {
-                groupIds.add(groupIdsStr);
+        List<String> groupIds = null;
+        try {
+            groupIds = getClaimValueFromTokens(groupIdsClaim, List.class, tokesInOrder, tokenClaimsMap);
+        } catch (Exception e) {
+        } finally {
+            if (groupIds == null) {
+                groupIds = new ArrayList<String>();
+                String groupIdsStr = getClaimValueFromTokens(groupIdsClaim, String.class, tokesInOrder, tokenClaimsMap);
+                if (groupIdsStr != null) {
+                    groupIds.add(groupIdsStr);
+                }
             }
         }
         if (groupIds.size() > 0 && TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
