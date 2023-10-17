@@ -166,7 +166,7 @@
 		 <AD id="tokenOrderToFetchCallerClaims" type="String" required="false" name="%tokenOrder" description="%tokenOrder.desc" 
         cardinality="3" default="IDToken" ibm:beta="true">        
         	<Option label="%tokenOrder.one" value="IDToken" />
-         	<Option label="%tokenOrder.two" value="AccessToken,IDToken,Userinfo" /> 
+         	<Option label="%tokenOrder.two" value="AccessToken, IDToken, Userinfo" /> 
    		 </AD>    
      </OCD>
 
