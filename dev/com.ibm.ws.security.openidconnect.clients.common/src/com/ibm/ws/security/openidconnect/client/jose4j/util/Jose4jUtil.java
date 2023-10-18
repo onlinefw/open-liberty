@@ -173,7 +173,7 @@ public class Jose4jUtil {
             tokenClaimsMap.put(Constants.TOKEN_TYPE_ACCESS_TOKEN, accessTokenClaims);
             tokenClaimsMap.put(Constants.TOKEN_TYPE_ID_TOKEN, idTokenClaims);
             tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
-            String[] tokesInOrder = clientConfig.getTokenOrderToFetchCallerClaims();
+            List<String> tokesInOrder = clientConfig.getTokenOrderToFetchCallerClaims();
 
             String userName = this.getUserName(clientConfig, tokesInOrder, tokenClaimsMap);
             if (userName == null || userName.isEmpty()) {
@@ -564,7 +564,7 @@ public class Jose4jUtil {
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    String getUserName(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+    String getUserName(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String userNameClaim = getUserNameClaim(clientConfig);
         String userName = getClaimValueFromTokens(userNameClaim, String.class, tokesInOrder, tokenClaimsMap);
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -593,7 +593,7 @@ public class Jose4jUtil {
         return uid;
     }
 
-    String getRealmName(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+    String getRealmName(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String realm = clientConfig.getRealmName();
         if (realm == null) {
             for (String claim : getRealmNameClaim(clientConfig)) {
@@ -619,7 +619,7 @@ public class Jose4jUtil {
         return claims;
     }
 
-    String getUniqueSecurityName(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String userName) throws MalformedClaimException {
+    String getUniqueSecurityName(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String userName) throws MalformedClaimException {
         String uniqueSecurityNameClaim = getUserNameClaim(clientConfig);
         String uniqueSecurityName = getClaimValueFromTokens(uniqueSecurityNameClaim, String.class, tokesInOrder, tokenClaimsMap);
 
@@ -633,7 +633,7 @@ public class Jose4jUtil {
         return clientConfig.getUniqueUserIdentifier();
     }
 
-    List<String> getGroups(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String realm) throws MalformedClaimException {
+    List<String> getGroups(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String realm) throws MalformedClaimException {
         List<String> groups = new ArrayList<String>();
         List<String> groupIds = getGroupIds(clientConfig, tokesInOrder, tokenClaimsMap);
         for (String gid : groupIds) {
@@ -644,7 +644,7 @@ public class Jose4jUtil {
     }
 
     @SuppressWarnings("unchecked")
-    List<String> getGroupIds(ConvergedClientConfig clientConfig, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+    List<String> getGroupIds(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String groupIdsClaim = getGroupIdsClaim(clientConfig);
         List<String> groupIds = null;
         try {
@@ -669,7 +669,7 @@ public class Jose4jUtil {
         return clientConfig.getGroupIdentifier();
     }
 
-    <T> T getClaimValueFromTokens(String claim, Class<T> claimType, String[] tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
+    <T> T getClaimValueFromTokens(String claim, Class<T> claimType, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         if (claim == null || claim.isEmpty()) {
             return null;
         }

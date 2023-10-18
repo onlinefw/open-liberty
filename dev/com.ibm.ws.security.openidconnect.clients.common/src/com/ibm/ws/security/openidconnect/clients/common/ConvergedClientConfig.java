@@ -142,5 +142,5 @@ public interface ConvergedClientConfig extends JwtConsumerConfig {
 
     public String getTokenRequestOriginHeader();
 
-    public String[] getTokenOrderToFetchCallerClaims(); // tokenOrderToFetchCallerClaims
+    public List<String> getTokenOrderToFetchCallerClaims(); // tokenOrderToFetchCallerClaims
 }

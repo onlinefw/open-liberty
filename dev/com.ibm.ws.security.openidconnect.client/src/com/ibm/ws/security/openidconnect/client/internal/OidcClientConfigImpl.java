@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.StringTokenizer;
 
 import javax.net.ssl.SSLSocketFactory;
 
@@ -309,7 +310,7 @@ public class OidcClientConfigImpl implements OidcClientConfig {
     private boolean useSystemPropertiesForHttpClientConnections = false;
     private boolean tokenReuse = false;
 
-    private String[] tokenOrderToFetchCallerClaims;
+    private List<String> tokenOrderToFetchCallerClaims;
 
     private final OidcSessionCache oidcSessionCache = new InMemoryOidcSessionCache();
 
@@ -566,10 +567,7 @@ public class OidcClientConfigImpl implements OidcClientConfig {
 
         // validateAuthzTokenEndpoints(); //TODO: update tests to expect the error if the validation here fails
 
-        tokenOrderToFetchCallerClaims = trimIt((String[]) props.get(CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS));
-        //        if (tokenOrderToFetchCallerClaims == null || tokenOrderToFetchCallerClaims.length == 0) {
-        //            tokenOrderToFetchCallerClaims = new String[] { com.ibm.ws.security.openidconnect.clients.common.Constants.TOKEN_TYPE_ID_TOKEN };
-        //        }
+        tokenOrderToFetchCallerClaims = split(trimIt((String) props.get(CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS)));
 
         if (discovery) {
             logDiscoveryMessage("OIDC_CLIENT_DISCOVERY_COMPLETE");
@@ -1953,8 +1951,27 @@ public class OidcClientConfigImpl implements OidcClientConfig {
     }
 
     @Override
-    public String[] getTokenOrderToFetchCallerClaims() {
+    public List<String> getTokenOrderToFetchCallerClaims() {
         return tokenOrderToFetchCallerClaims;
+    }
+
+    static List<String> split(String str) {
+        List<String> rvalue = new ArrayList<String>();
+        if (str != null) {
+            StringTokenizer st = new StringTokenizer(str, ", ");
+            while (st.hasMoreElements()) {
+                rvalue.add(st.nextToken());
+            }
+        }
+        return rvalue;
+    }
+
+    public static void main(String[] args) {
+        String str = "AccessToken, IDToken,Userinfo";
+        List<String> splitList = split(str);
+        for (String aStr : splitList) {
+            System.out.println(aStr);
+        }
     }
 
 }
