@@ -157,22 +157,31 @@ public class Jose4jUtil {
         Hashtable<String, Object> customProperties = new Hashtable<String, Object>();
 
         try {
+            Map<String, JwtClaims> tokenClaimsMap = new HashMap<String, JwtClaims>();
+
             JwtClaims idTokenClaims = getClaimsFromIdToken(idTokenStr, clientConfig, oidcClientRequest);
             OidcTokenImplBase idToken = getOidcToken(idTokenClaims, accessTokenStr, refreshTokenStr, clientId, Constants.TOKEN_TYPE_ID_TOKEN);
             String sub = idToken.getSubject();
             if (sub == null) {
                 return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
             }
+            tokenClaimsMap.put(Constants.TOKEN_TYPE_ID_TOKEN, idTokenClaims);
+
+            // access token
+            JwtClaims accessTokenClaims = getClaimsFromAccessToken(accessTokenStr);
+            tokenClaimsMap.put(Constants.TOKEN_TYPE_ACCESS_TOKEN, accessTokenClaims);
 
             UserInfoHelper userInfoHelper = new UserInfoHelper(clientConfig, sslSupport);
             String userInfoStr = userInfoHelper.getUserInfoIfPossible(sub, accessTokenStr, sslSocketFactory, oidcClientRequest);
+            if (userInfoStr != null) {
+                try {
+                    JwtClaims userInfoClaims = getClaimsFromUserInfo(userInfoStr);
+                    tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
+                } catch (Exception e) {
+                    Tr.error(tc, "Invalid user info: " + userInfoStr);
+                }
+            }
 
-            JwtClaims accessTokenClaims = getClaimsFromAccessToken(accessTokenStr);
-            JwtClaims userInfoClaims = getClaimsFromUserInfo(userInfoStr);
-            Map<String, JwtClaims> tokenClaimsMap = new HashMap<String, JwtClaims>();
-            tokenClaimsMap.put(Constants.TOKEN_TYPE_ACCESS_TOKEN, accessTokenClaims);
-            tokenClaimsMap.put(Constants.TOKEN_TYPE_ID_TOKEN, idTokenClaims);
-            tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
             List<String> tokesInOrder = clientConfig.getTokenOrderToFetchCallerClaims();
 
             String userName = this.getUserName(clientConfig, tokesInOrder, tokenClaimsMap);
@@ -186,9 +195,7 @@ public class Jose4jUtil {
                     customProperties.put(AttributeNameConstants.WSCREDENTIAL_REALM, realm);
                 }
                 String uniqueSecurityName = this.getUniqueSecurityName(clientConfig, tokesInOrder, tokenClaimsMap, userName);
-                if (uniqueSecurityName != null && !uniqueSecurityName.isEmpty()) {
-                    customProperties.put(AttributeNameConstants.WSCREDENTIAL_REALM, realm);
-                }
+
                 List<String> groups = getGroups(clientConfig, tokesInOrder, tokenClaimsMap, realm);
                 if (groups != null && !groups.isEmpty()) {
                     customProperties.put(AttributeNameConstants.WSCREDENTIAL_GROUPS, groups);
@@ -564,6 +571,15 @@ public class Jose4jUtil {
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////
 
+    /**
+     * Find the user name from one of the tokens.
+     *
+     * @param clientConfig
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @return
+     * @throws MalformedClaimException
+     */
     String getUserName(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String userNameClaim = getUserNameClaim(clientConfig);
         String userName = getClaimValueFromTokens(userNameClaim, String.class, tokesInOrder, tokenClaimsMap);
@@ -578,6 +594,15 @@ public class Jose4jUtil {
         return userName;
     }
 
+    /**
+     * Find the claim of the user name from the configuration.
+     *
+     * @param clientConfig
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @return
+     * @throws MalformedClaimException
+     */
     String getUserNameClaim(ConvergedClientConfig clientConfig) {
         String attrUsedToCreateSubject = clientConfig.isSocial() ? "userNameAttribute" : "userIdentifier";
         String uid = clientConfig.getUserIdentifier();
@@ -593,6 +618,15 @@ public class Jose4jUtil {
         return uid;
     }
 
+    /**
+     * Find the realm name from one of the tokens.
+     *
+     * @param clientConfig
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @return
+     * @throws MalformedClaimException
+     */
     String getRealmName(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String realm = clientConfig.getRealmName();
         if (realm == null) {
@@ -609,6 +643,12 @@ public class Jose4jUtil {
         return realm;
     }
 
+    /**
+     * Find the claim(s) of the user name from the configuration.
+     *
+     * @param clientConfig
+     * @return
+     */
     List<String> getRealmNameClaim(ConvergedClientConfig clientConfig) {
         List<String> claims = new ArrayList<String>();
         String claim = clientConfig.getRealmIdentifier();
@@ -619,6 +659,16 @@ public class Jose4jUtil {
         return claims;
     }
 
+    /**
+     * Find the unique security name from one of the tokens.
+     *
+     * @param clientConfig
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @param userName
+     * @return
+     * @throws MalformedClaimException
+     */
     String getUniqueSecurityName(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String userName) throws MalformedClaimException {
         String uniqueSecurityNameClaim = getUserNameClaim(clientConfig);
         String uniqueSecurityName = getClaimValueFromTokens(uniqueSecurityNameClaim, String.class, tokesInOrder, tokenClaimsMap);
@@ -629,10 +679,26 @@ public class Jose4jUtil {
         return uniqueSecurityName;
     }
 
+    /**
+     * Find the claim of the unique security name from the configuration.
+     *
+     * @param clientConfig
+     * @return
+     */
     String getUniqueSecurityNameClaim(ConvergedClientConfig clientConfig) {
         return clientConfig.getUniqueUserIdentifier();
     }
 
+    /**
+     * Build the list of groups using the group id(s) previously found from one of the tokens.
+     *
+     * @param clientConfig
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @param realm
+     * @return
+     * @throws MalformedClaimException
+     */
     List<String> getGroups(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap, String realm) throws MalformedClaimException {
         List<String> groups = new ArrayList<String>();
         List<String> groupIds = getGroupIds(clientConfig, tokesInOrder, tokenClaimsMap);
@@ -643,6 +709,15 @@ public class Jose4jUtil {
         return groups;
     }
 
+    /**
+     * Find the group id(s) from one of the tokens.
+     *
+     * @param clientConfig
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @return
+     * @throws MalformedClaimException
+     */
     @SuppressWarnings("unchecked")
     List<String> getGroupIds(ConvergedClientConfig clientConfig, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         String groupIdsClaim = getGroupIdsClaim(clientConfig);
@@ -665,10 +740,27 @@ public class Jose4jUtil {
         return groupIds;
     }
 
+    /**
+     * Find the claim of the group id(s) from the configuration.
+     *
+     * @param clientConfig
+     * @return
+     */
     String getGroupIdsClaim(ConvergedClientConfig clientConfig) {
         return clientConfig.getGroupIdentifier();
     }
 
+    /**
+     * Jakarta way of implementation: get claim value from one of tokens for a specific claim.
+     *
+     * @param <T>
+     * @param claim
+     * @param claimType
+     * @param tokesInOrder
+     * @param tokenClaimsMap
+     * @return
+     * @throws MalformedClaimException
+     */
     <T> T getClaimValueFromTokens(String claim, Class<T> claimType, List<String> tokesInOrder, Map<String, JwtClaims> tokenClaimsMap) throws MalformedClaimException {
         if (claim == null || claim.isEmpty()) {
             return null;
@@ -685,6 +777,14 @@ public class Jose4jUtil {
         return claimValue;
     }
 
+    /**
+     * Jakarta way of implementation: check whether value exists.
+     *
+     * @param <T>
+     * @param claimValue
+     * @param claimType
+     * @return
+     */
     @SuppressWarnings("rawtypes")
     <T> boolean valueExistsAndIsNotEmpty(T claimValue, Class<T> claimType) {
         if (claimValue == null) {
