@@ -568,8 +568,7 @@ public class OidcClientConfigImpl implements OidcClientConfig {
         // validateAuthzTokenEndpoints(); //TODO: update tests to expect the error if the validation here fails
 
         tokenOrderToFetchCallerClaims = split(trimIt((String) props.get(CFG_KEY_TOKEN_ORDER_TOFETCH_CALLER_CLAIMS)));
-        if (tokenOrderToFetchCallerClaims == null || tokenOrderToFetchCallerClaims.size() == 0) {
-            tokenOrderToFetchCallerClaims = new ArrayList<String>();
+        if (tokenOrderToFetchCallerClaims.size() == 0) {
             tokenOrderToFetchCallerClaims.add(com.ibm.ws.security.openidconnect.clients.common.Constants.TOKEN_TYPE_ID_TOKEN);
         }
 
