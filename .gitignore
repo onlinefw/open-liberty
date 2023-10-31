@@ -33,3 +33,5 @@
 
 # Ignore direnv files - for quickly switching between JDK levels between projects
 .envrc
+dev/com.ibm.ws.org.apache.servicemix.bundles.bcel/.project
+dev/com.ibm.websphere.appserver.api.data/.project
