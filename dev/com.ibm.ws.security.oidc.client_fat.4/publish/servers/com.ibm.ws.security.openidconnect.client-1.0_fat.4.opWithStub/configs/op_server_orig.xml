@@ -36,6 +36,8 @@
 	<include location="${server.config.dir}/imports/op_fatTestPorts.xml" />
 	
 	<include location="${server.config.dir}/imports/tokenEndpointApplication.xml" />
+	
+	<include location="${server.config.dir}/imports/userinfoEndpointApplication.xml" />
 
 	<include location="${server.config.dir}/imports/oidcProvider.xml" />
 
