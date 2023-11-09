@@ -173,7 +173,7 @@ public class Jose4jUtil {
             if (userInfoStr != null) {
                 try {
                     userInfoClaims = getClaimsFromUserInfo(userInfoStr);
-                    
+
                 } catch (Exception e) {
                     Tr.error(tc, "Invalid user info: " + userInfoStr);
                 }
@@ -186,14 +186,13 @@ public class Jose4jUtil {
                 tokenClaimsMap.put(Constants.TOKEN_TYPE_ACCESS_TOKEN, accessTokenClaims);
                 if (userInfoStr != null) {
                     tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
-                }       
+                }
             }
 
             String userName = this.getUserName(clientConfig, tokensOrderToFetchCallerClaims, tokenClaimsMap);
             if (userName == null || userName.isEmpty()) {
                 return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
             }
-            
 
             boolean isImplicit = Constants.IMPLICIT.equals(clientConfig.getGrantType());
             // verify nonce when nonce is enabled
@@ -207,7 +206,7 @@ public class Jose4jUtil {
                     return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
                 }
             }
-            
+
             // if social login flow, put tokens and anything else social might want
             // into PAR props here and return it. Social will build the subject.
             if (clientConfig.isSocial()) {
@@ -249,7 +248,6 @@ public class Jose4jUtil {
                 String uniqueID = new StringBuffer("user:").append(realm).append("/").append(uniqueSecurityName).toString();
                 customProperties.put(AttributeNameConstants.WSCREDENTIAL_UNIQUEID, uniqueID);
             }
-
 
             if (clientConfig.isIncludeCustomCacheKeyInSubject() || clientConfig.isDisableLtpaCookie()) {
                 //long storingTime = new Date().getTime();
@@ -677,7 +675,7 @@ public class Jose4jUtil {
      * @throws MalformedClaimException
      */
     String getUniqueSecurityName(ConvergedClientConfig clientConfig, List<String> tokensOrderToFetchCallerClaims, Map<String, JwtClaims> tokenClaimsMap, String userName) throws MalformedClaimException {
-        String uniqueSecurityNameClaim = getUserNameClaim(clientConfig);
+        String uniqueSecurityNameClaim = getUniqueSecurityNameClaim(clientConfig);
         String uniqueSecurityName = getClaimValueFromTokens(uniqueSecurityNameClaim, String.class, tokensOrderToFetchCallerClaims, tokenClaimsMap);
 
         if (uniqueSecurityName == null || uniqueSecurityName.isEmpty()) {
