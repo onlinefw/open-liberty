@@ -180,16 +180,58 @@ public class Jose4jUtil {
             }
 
             List<String> tokensOrderToFetchCallerClaims = clientConfig.getTokenOrderToFetchCallerClaims();
-            if (tokensOrderToFetchCallerClaims.size() > 1) {
+            if (tokensOrderToFetchCallerClaims.size() > 1 && tokensOrderToFetchCallerClaims.contains(Constants.TOKEN_TYPE_ACCESS_TOKEN)) {
                 // access token
                 JwtClaims accessTokenClaims = getClaimsFromAccessToken(accessTokenStr);
                 tokenClaimsMap.put(Constants.TOKEN_TYPE_ACCESS_TOKEN, accessTokenClaims);
-                tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
+                if (userInfoStr != null) {
+                    tokenClaimsMap.put(Constants.TOKEN_TYPE_USER_INFO, userInfoClaims);
+                }       
             }
 
             String userName = this.getUserName(clientConfig, tokensOrderToFetchCallerClaims, tokenClaimsMap);
             if (userName == null || userName.isEmpty()) {
                 return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
+            }
+            
+
+            boolean isImplicit = Constants.IMPLICIT.equals(clientConfig.getGrantType());
+            // verify nonce when nonce is enabled
+            // this id for ID Token only
+            if (clientConfig.isNonceEnabled() || isImplicit) {
+                String nonceInIDToken = idToken.getNonce();
+                boolean bNonceVerified = OidcUtil.verifyNonce(oidcClientRequest, nonceInIDToken, clientConfig, responseState);
+                if (!bNonceVerified) {
+                    // Error handling
+                    Tr.error(tc, "OIDC_CLIENT_REQUEST_NONCE_FAILED", new Object[] { clientId, nonceInIDToken });
+                    return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
+                }
+            }
+            
+            // if social login flow, put tokens and anything else social might want
+            // into PAR props here and return it. Social will build the subject.
+            if (clientConfig.isSocial()) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "social login flow, storing id token in result");
+                }
+                Hashtable<String, Object> props = new Hashtable<String, Object>();
+                props.put(Constants.ID_TOKEN, originalIdTokenString);
+                props.put(Constants.ACCESS_TOKEN, accessTokenStr);
+                if (refreshTokenStr != null) {
+                    props.put(Constants.REFRESH_TOKEN, refreshTokenStr);
+                }
+                if (idToken != null) {
+                    props.put(Constants.ID_TOKEN_OBJECT, idToken);
+                }
+                if (userInfoStr != null) {
+                    props.put(Constants.USERINFO_STR, userInfoStr);
+                }
+                oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, null, null, props, null);
+                if (isRunningBetaMode()) {
+                    //createWASOidcSession(oidcClientRequest, jwtClaims, clientConfig);
+                    createWASOidcSession(oidcClientRequest, idToken.getJwtClaims(), clientConfig);
+                }
+                return oidcResult;
             }
 
             if (!clientConfig.isMapIdentityToRegistryUser()) {
@@ -208,44 +250,6 @@ public class Jose4jUtil {
                 customProperties.put(AttributeNameConstants.WSCREDENTIAL_UNIQUEID, uniqueID);
             }
 
-            boolean isImplicit = Constants.IMPLICIT.equals(clientConfig.getGrantType());
-            // verify nonce when nonce is enabled
-            // this id for ID Token only
-            if (clientConfig.isNonceEnabled() || isImplicit) {
-                String nonceInIDToken = idToken.getNonce();
-                boolean bNonceVerified = OidcUtil.verifyNonce(oidcClientRequest, nonceInIDToken, clientConfig, responseState);
-                if (!bNonceVerified) {
-                    // Error handling
-                    Tr.error(tc, "OIDC_CLIENT_REQUEST_NONCE_FAILED", new Object[] { clientId, nonceInIDToken });
-                    return new ProviderAuthenticationResult(AuthResult.SEND_401, HttpServletResponse.SC_UNAUTHORIZED);
-                }
-            }
-
-            // if social login flow, put tokens and anything else social might want
-            // into PAR props here and return it. Social will build the subject.
-            if (clientConfig.isSocial()) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(tc, "social login flow, storing id token in result");
-                }
-                Hashtable<String, Object> props = new Hashtable<String, Object>();
-                props.put(Constants.ID_TOKEN, originalIdTokenString);
-                props.put(Constants.ACCESS_TOKEN, accessTokenStr);
-                if (refreshTokenStr != null) {
-                    props.put(Constants.REFRESH_TOKEN, refreshTokenStr);
-                }
-                if (idToken != null) {
-                    props.put(Constants.ID_TOKEN_OBJECT, idToken);
-                }
-                if (userInfoStr != null) {
-                    customProperties.put(Constants.USERINFO_STR, userInfoStr);
-                }
-                oidcResult = new ProviderAuthenticationResult(AuthResult.SUCCESS, HttpServletResponse.SC_OK, null, null, props, null);
-                if (isRunningBetaMode()) {
-                    //createWASOidcSession(oidcClientRequest, jwtClaims, clientConfig);
-                    createWASOidcSession(oidcClientRequest, idToken.getJwtClaims(), clientConfig);
-                }
-                return oidcResult;
-            }
 
             if (clientConfig.isIncludeCustomCacheKeyInSubject() || clientConfig.isDisableLtpaCookie()) {
                 //long storingTime = new Date().getTime();
